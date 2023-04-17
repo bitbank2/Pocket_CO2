@@ -13,7 +13,7 @@
 #include "scd41.h"
 #include "Arduino.h"
 #include "oled.h"
-#include "st7302.h"
+//#include "st7302.h"
 #include "Roboto_Black_40.h"
 #include "Roboto_Black_13.h"
 #include "co2_emojis.h"
@@ -394,12 +394,8 @@ int GetButtons(void)
 
 void RunLowPower(void)
 {
-	int i, iUITick = 0, iSampleTick = 0;
+	int i, iUITick = 20, iSampleTick = 0;
 
-	oledFill(0);
-	oledWriteString(0,0,"Low Power...", FONT_8x8, 0);
-	Delay_Ms(1000);
-//	oledPower(0); // turn off the OLED
 	while (1) {
 		// capture a sample every 5 minutes
 		if (iSampleTick == 0) {
@@ -443,9 +439,44 @@ void RunLowPower(void)
 	}
 } /* RunLowPower() */
 
+//
+// Wait for user to press a button, show 1 minute of samples
+// then go back to sleep
+//
 void RunOnDemand(void)
 {
-
+	Delay_Ms(2000); // show startup message for 2 seconds
+	oledPower(0);
+	while (1) {
+		int i, j;
+#ifdef DEBUG_MODE
+			Delay_Ms(3*82); // use a power wasting delay to allow SWDIO to work
+#else
+			Standby82ms(3); // conserve power (1.8mA running, 10uA standby)
+#endif
+			i = GetButtons();
+			if (i == 3) { // both buttons pressed
+				return; // go back to main menu
+			}
+			if (i != 0) { // a button was pressed, display 1 minute of samples
+               oledInit(0x3c, 400000);
+			   oledFill(0);
+			   oledWriteString(0,0,"Waking up...", FONT_8x8, 0);
+			   I2CSetSpeed(50000);
+		       scd41_start(SCD_POWERMODE_NORMAL);
+			   for (j=0; j<4*60; j++) { // wait for time to pass
+				   Delay_Ms(250);
+				   if (j % 20 == 19) { // show new data every 5 seconds
+					   scd41_getSample();
+					   ShowCurrent(); // display the current conditions on the OLED
+				   }
+				   i = GetButtons();
+				   if (i == 3) return; // go to main menu
+			   } // for j (1 minute of samples
+			   scd41_stop(); // go back to low power standby mode
+			   oledPower(0);
+			} // a button was pressed
+	} // while (1)
 } /* RunOnDemand() */
 
 int main(void)
@@ -461,6 +492,10 @@ int main(void)
     ShowAlert(); // blink LEDs and vibration motor
 menu_top:
    RunMenu();
+   // Display the chosen mode
+	oledFill(0);
+	oledWriteString(0,0,szMode[iMode], FONT_8x8, 0);
+    oledWriteString(0,8,"Starting...", FONT_8x8, 0);
    if (iMode == MODE_TIMER) {
 	   RunTimer();
 	   goto menu_top;

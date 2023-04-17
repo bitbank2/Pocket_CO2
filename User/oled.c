@@ -187,9 +187,7 @@ uint8_t buf[4];
 void oledDrawSprite(int x, int y, int cx, int cy, uint8_t *pSprite, int iPitch, int bInvert)
 {
     int tx, ty, dx, dy, iStartX;
-    uint8_t *s, *d, uc, pix, ucSrcMask, ucDstMask, ucFill;
-    int iLocalPitch;
-    iLocalPitch = OLED_WIDTH;
+    uint8_t *s, *d, pix, ucSrcMask, ucDstMask, ucFill;
 
     if (x+cx < 0 || y+cy < 0 || x >= OLED_WIDTH || y >= OLED_HEIGHT)
         return; // out of bounds
