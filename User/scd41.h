@@ -33,13 +33,13 @@ enum {
 #define SCD41_CMD_WAKEUP                                  0x36f6 // execution time: 20ms
 
 int scd41_readRegister(uint16_t u16Register, uint16_t *pOut);
-void scd41_wakeup(void);
+void scd41_wakeup(void); // SCD41 only
 int scd41_sendCMD(uint16_t u16Cmd);
 int scd41_sendCMD2(uint16_t u16Cmd, uint16_t u16Parameter);
 uint8_t scd41_computeCRC8(uint8_t *data, uint8_t len);
 int scd41_start(int iPowerMode);
 int scd41_getSample(void);
-int scd41_shutdown(void);
+int scd41_shutdown(void); // SCD41 only
 int scd41_stop(void);
 
 

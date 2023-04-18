@@ -27,7 +27,7 @@
 #define LED_RED 0xc4
 #define MOTOR_PIN 0xc5
 
-#define DEBUG_MODE
+//#define DEBUG_MODE
 
 enum
 {
@@ -359,11 +359,13 @@ int i;
 	switch (iAlert)
 	{
 	case ALERT_VIBRATION:
+#ifdef FUTURE
 		for (i=0; i<3; i++) {
 		    Vibrate(150);
 		//    Standby82ms(10);
 		    Delay_Ms(820);
 		  }
+#endif
 		break;
 	case ALERT_LED:
 		for (i=0; i<4; i++) {
@@ -373,7 +375,7 @@ int i;
 		break;
 	case ALERT_BOTH:
 		for (i=0; i<3; i++) {
-		    Vibrate(150);
+		  //  Vibrate(150);
 		    BlinkLED(LED_GREEN, 400);
 		    BlinkLED(LED_RED, 400);
 		  }
@@ -395,44 +397,54 @@ int GetButtons(void)
 void RunLowPower(void)
 {
 	int i, iUITick = 20, iSampleTick = 0;
+	int bWasSuspended = 0;
+
+    I2CSetSpeed(50000);
+    scd41_start(SCD_POWERMODE_LOW); // start low power mode (available on SCD40 & SCD41)
 
 	while (1) {
-		// capture a sample every 5 minutes
-		if (iSampleTick == 0) {
-           I2CInit(50000);
-	       scd41_start(SCD_POWERMODE_NORMAL);
-	      // Delay_Ms(5000);
-		}
 		i = GetButtons();
-		//pinMode(LED_GREEN, OUTPUT);
-		//pinMode(LED_RED, OUTPUT);
-		//digitalWrite(LED_GREEN, i & 1);
-		//digitalWrite(LED_RED, i>>1);
 		if (i == 3) { // both buttons pressed, return to menu
-	//	    oledInit(0x3c, 400000);
+			if (bWasSuspended == 1) {
+				I2CInit(50000);
+			}
+			scd41_stop(); // stop collecting samples
 			return;
 		} else if (i && iUITick == 0) { // one button pressed, show the current data
-//		   oledInit(0x3c, 400000);
+			if (bWasSuspended == 1) {
+				I2CInit(400000);
+				bWasSuspended = 0;
+			}
 		   oledPower(1);
 		   ShowCurrent(); // display the current conditions on the OLED
 		   iUITick = 20; // number of 250ms periods before turning off the display
 		}
+#ifdef DEBUG_MODE
 		Delay_Ms(250);
-		//Standby82ms(3); // conserve power (1.8mA running, 10uA standby)
+#else
+	Standby82ms(3); // conserve power (1.8mA running, 10uA standby)
+	bWasSuspended = 1;
+#endif
 		iSampleTick++;
-		if (iSampleTick == 21) { // 5 seconds have passed
-		  // I2CInit(50000);
-			I2CSetSpeed(50000);
+		if (iSampleTick == 120) { // 30 seconds have passed
+			if (bWasSuspended == 1) {
+				I2CInit(50000);
+				bWasSuspended = 0;
+			} else {
+				I2CSetSpeed(50000);
+			}
 	       scd41_getSample();
-	       scd41_stop(); // power down the sensor
-		}
-		if (iSampleTick == 1200) { // 5 minutes have passed, get another sample
-			iSampleTick = 0;
+	       iSampleTick = 0; // restart the 30 second timer for the next sample
 		}
 		if (iUITick > 0) {
 			iUITick--;
-			if (iUITick == 0) { // shut off the display
-				I2CInit(400000);
+			if (iUITick == 0) { // shut off the display after 5 seconds
+				if (bWasSuspended) {
+					I2CInit(400000);
+					bWasSuspended = 0;
+				} else {
+					I2CSetSpeed(400000);
+				}
 				oledPower(0);
 			}
 		}
@@ -465,15 +477,24 @@ void RunOnDemand(void)
 			   I2CSetSpeed(50000);
 		       scd41_start(SCD_POWERMODE_NORMAL);
 			   for (j=0; j<4*60; j++) { // wait for time to pass
+#ifdef DEBUG_MODE
 				   Delay_Ms(250);
+#else
+				   Standby82ms(3);
+#endif
 				   if (j % 20 == 19) { // show new data every 5 seconds
+					   I2CInit(50000);
 					   scd41_getSample();
 					   ShowCurrent(); // display the current conditions on the OLED
 				   }
 				   i = GetButtons();
-				   if (i == 3) return; // go to main menu
+				   if (i == 3) {
+					   scd41_stop();
+					   return; // go to main menu
+				   }
 			   } // for j (1 minute of samples
-			   scd41_stop(); // go back to low power standby mode
+			   I2CInit(50000);
+			   scd41_shutdown();
 			   oledPower(0);
 			} // a button was pressed
 	} // while (1)
@@ -488,6 +509,8 @@ int main(void)
 //    Delay_Ms(5000); //100); // give time for power to settle
 //    USART_Printf_Init(460800);
 //    printf("SystemClk:%d\r\n",SystemCoreClock);
+    pinMode(MOTOR_PIN, OUTPUT);
+    digitalWrite(MOTOR_PIN, 0);
     iAlert = ALERT_BOTH;
     ShowAlert(); // blink LEDs and vibration motor
 menu_top:
@@ -508,14 +531,19 @@ menu_top:
    } else { // continuous mode
 	   I2CSetSpeed(50000);
 	   scd41_start(SCD_POWERMODE_NORMAL);
+#ifdef DEBUG_MODE
 	   Delay_Ms(5000); // allow time for first sample to capture
+#else
+	   Standby82ms(59);
+#endif
     while(1) {
     	int i, j;
 get_sample:
-    	I2CSetSpeed(50000); // SCD40 can't handle 400k
+        I2CInit(50000); // SCD40 can't handle 400k
+    	//I2CSetSpeed(50000); // SCD40 can't handle 400k
     	scd41_getSample();
     	iSample++;
-    	if (iSample > 3) AddSample(iSample); // add it to collected stats
+//    	if (iSample > 3) AddSample(iSample); // add it to collected stats
     	if (iSample == 16 && iMode != MODE_CONTINUOUS ) { // after 1 minute, turn off the display
     		oledPower(0); // turn off display
     	}
