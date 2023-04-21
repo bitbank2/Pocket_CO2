@@ -1,22 +1,20 @@
-/********************************** (C) COPYRIGHT *******************************
- * File Name          : main.c
- * Author             : Larry Bank
- * Version            : V1.0.0
- * Date               : 2023/01/15
- * Description        : Portable CO2 measurement unit
- * Copyright (c) 2023 BitBank Software, Inc. All rights reserved
- *******************************************************************************/
-
+//
+// Pocket CO2 detector
+// by Larry Bank
+// project started December 2022
+//
 #include <stdint.h>
 #include <string.h>
 #include "debug.h"
 #include "scd41.h"
 #include "Arduino.h"
 #include "oled.h"
-//#include "st7302.h"
 #include "Roboto_Black_40.h"
 #include "Roboto_Black_13.h"
 #include "co2_emojis.h"
+
+// end of 16k FLASH is at 0x08004000
+#define FLASH_START 0x08003c00
 
 #define DC_PIN 0xd3
 #define CS_PIN 0xd2
@@ -27,13 +25,22 @@
 #define LED_RED 0xc4
 #define MOTOR_PIN 0xc5
 
-//#define DEBUG_MODE
+#define DEBUG_MODE
+
+typedef struct tagState
+{
+	int iMode;
+	int iAlert;
+	int iLevel;
+	int iPeriod;
+} STATE;
 
 enum
 {
 	MODE_CONTINUOUS=0,
 	MODE_LOW_POWER,
 	MODE_ON_DEMAND,
+	MODE_CALIBRATE,
 	MODE_TIMER,
 	MODE_COUNT
 };
@@ -46,15 +53,22 @@ enum
 	ALERT_COUNT
 };
 
+enum
+{
+	MENU_START=0,
+	MENU_MODE,
+	MENU_WARN,
+	MENU_ALERT,
+	MENU_TIME,
+	MENU_COUNT
+};
+
 int GetButtons(void);
 void ShowAlert(void);
 
-const char *szMode[] = {"Continuous", "Low Power ", "On Demand ", "Timer     "};
+const char *szMode[] = {"Continuous", "Low Power ", "On Demand ", "Calibrate ", "Timer     "};
 const char *szAlert[] = {"Vibration", "LEDs     ", "Vib+LEDs "};
-static int iMode = MODE_CONTINUOUS; // default
-static int iAlert = 0; // vibration only
-static int iLevel = 1000; // warning level
-static int iPeriod = 5; // wake up period in minutes
+STATE state;
 
 #define MAX_SAMPLES 540
 static uint8_t ucLast32[32]; // holds top 8 bits of last 32 samples
@@ -93,6 +107,39 @@ int i2str(char *pDest, int iVal)
 	*d++ = 0; // terminator
 	return (int)(d - pDest - 1); // string length
 } /* i2str() */
+
+// Write the state variables to the 64-byte user FLASH memory area
+void WriteFlash(void) {
+int i;
+uint32_t *s = (uint32_t *)&state;
+
+    FLASH_Unlock_Fast();
+    FLASH_ErasePage_Fast(FLASH_START);
+    FLASH_BufReset();
+    for(i=0; i<sizeof(state)/4; i++){
+	    FLASH_BufLoad(FLASH_START+(4*i), s[i]);
+    }
+    FLASH_ProgramPage_Fast(FLASH_START);
+    FLASH_Lock_Fast();
+} /* WriteFlash() */
+
+// Read the state variables from FLASH memory
+void ReadFlash(void) {
+int i;
+uint32_t *d = (uint32_t *)&state;
+
+	for (i=0; i<sizeof(state)/4; i++) {
+		d[i] = *(uint32_t *)(FLASH_START + (4 * i));
+	}
+	if (state.iPeriod < 5 || state.iPeriod > 60) {
+	// Data is not valid, set default values
+        state.iMode = MODE_CONTINUOUS;
+        state.iAlert = 0; // vibration only
+        state.iLevel = 1000; // warning level
+        state.iPeriod = 5; // wake up period in minutes
+        WriteFlash(); // write the default values in FLASH
+	}
+} /* ReadFlash() */
 
 //
 // Add a sample to the collected statistics
@@ -205,18 +252,10 @@ char szTemp[32];
 
 	I2CSetSpeed(400000); // OLED can handle 400k
 	i2str(szTemp, (int)_iCO2);
-	oledClearLine(0); // make sure old pixels are gone
-	oledClearLine(8);
-	oledClearLine(16); // need to clear the lines since the prop font doesn't overwrite all pixels
-	oledClearLine(24);
 	oledWriteStringCustom(&Roboto_Black_40, 0, 32, szTemp, 1);
 	x = oledGetCursorX();
 	oledWriteString(x, 0, "CO2", FONT_8x8, 0);
 	oledWriteString(x, 8, "ppm", FONT_8x8, 0);
-	oledClearLine(32);
-	oledClearLine(40);
-	oledClearLine(48);
-	oledClearLine(56);
     oledWriteStringCustom(&Roboto_Black_13, 0, 45, (char *)"Temp", 1);
     oledWriteStringCustom(&Roboto_Black_13, 0, 63, (char *)"Humidity", 1);
     i2str(szTemp, _iTemperature/10); // whole part
@@ -239,21 +278,35 @@ char szTemp[32];
 
 void RunTimer(void)
 {
-  int i, iTicks = iPeriod * 731; // number of 83ms ticks per minute
-//  oledPower(0); // turn off the display
+  int i, j, iTicks = 5;
   oledFill(0);
-  oledContrast(20);
+//  oledContrast(20);
   oledWriteString(0,0, "Timer Mode", FONT_12x16, 0);
-  while (iTicks > 0) {
-	  Delay_Ms(820);
+  for (i=state.iPeriod*60; i>=0; i--) { // count down seconds
+	  ShowTime(i);
 //	  Standby82ms(10); // sleep about 820ms
-	  i = GetButtons();
-	  if (i == 3) { // both buttons cancels timer mode
+	  j = GetButtons();
+	  if (j == 3) { // both buttons cancels timer mode
 		  return;
 	  }
-//	  BlinkLED((j & 1) ? LED_GREEN : LED_RED, 50);
-//	  j++;
-	  iTicks -= 10;
+	  if (j && iTicks == 0) { // a single button press turns on the display
+		  iTicks = 5;
+		  oledPower(1);
+	  }
+	  if (i == 10) { // turn on the display for the last 10 seconds
+		  if (iTicks == 0) {
+			  oledPower(1);
+		  }
+		  iTicks = 11;
+	  }
+	  if (iTicks) {
+		  iTicks--;
+		  if (iTicks == 0) {
+			  oledPower(0); // turn off the display
+		  }
+	  }
+	  BlinkLED((i & 1) ? LED_GREEN : LED_RED, 10);
+	  Delay_Ms(990);
   }
   ShowAlert();
 } /* RunTimer() */
@@ -261,40 +314,39 @@ void RunTimer(void)
 void RunMenu(void)
 {
 int iSelItem = 0;
-int y;
+int y, bDone = 0;
 char szTemp[16];
+STATE oldstate = state;
 
-//       pinMode(BUTTON0_PIN, INPUT_PULLUP);
-//       pinMode(BUTTON1_PIN, INPUT_PULLUP);
 	   oledInit(0x3c, 400000);
 	   oledFill(0);
 	   oledContrast(150);
 	   oledWriteString(4,0,"Pocket CO2", FONT_12x16, 0);
 //	   oledWriteString(0,16,"================", FONT_8x8, 0);
-	   while (1) {
+	   while (!bDone) {
 		   // draw the menu items and highlight the currently selected one
 		   y = 24;
-		   oledWriteString(0,y, "Mode", FONT_8x8, (iSelItem == 0));
-		   oledWriteString(40,y, szMode[iMode], FONT_8x8, 0);
+		   oledWriteString(0,y,"Start", FONT_8x8, (iSelItem == MENU_START));
 		   y += 8;
-		   oledWriteString(0,y,"Warn", FONT_8x8, (iSelItem == 1));
-		   if (iLevel == 500) {// disabled
+		   oledWriteString(0,y, "Mode", FONT_8x8, (iSelItem == MENU_MODE));
+		   oledWriteString(40,y, szMode[state.iMode], FONT_8x8, 0);
+		   y += 8;
+		   oledWriteString(0,y,"Warn", FONT_8x8, (iSelItem == MENU_WARN));
+		   if (state.iLevel == 500) {// disabled
 			   oledWriteString(40,y,"Disabled", FONT_8x8, 0);
 		   } else {
-     		   i2str(szTemp, iLevel);
+     		   i2str(szTemp, state.iLevel);
 	    	   oledWriteString(40,y, szTemp, FONT_8x8, 0);
 		       oledWriteString(-1,y, " ppm ", FONT_8x8, 0); // erase old value
 		   }
 		   y += 8;
-		   oledWriteString(0,y,"Alert", FONT_8x8, (iSelItem == 2));
-		   oledWriteString(48,y,szAlert[iAlert], FONT_8x8, 0);
+		   oledWriteString(0,y,"Alert", FONT_8x8, (iSelItem == MENU_ALERT));
+		   oledWriteString(48,y,szAlert[state.iAlert], FONT_8x8, 0);
 		   y += 8;
-		   oledWriteString(0,y,"Time", FONT_8x8, (iSelItem == 3));
-		   i2str(szTemp, iPeriod); // time in minutes
+		   oledWriteString(0,y,"Time", FONT_8x8, (iSelItem == MENU_TIME));
+		   i2str(szTemp, state.iPeriod); // time in minutes
 		   oledWriteString(40, y, szTemp, FONT_8x8, 0);
 		   oledWriteString(-1,y, " Mins ", FONT_8x8, 0); // erase old value
-		   y += 8;
-		   oledWriteString(0,y,"Start", FONT_8x8, (iSelItem == 4));
 		   // wait for button releases
 		   while (GetButtons() != 0) {
 			   Delay_Ms(20);
@@ -306,34 +358,38 @@ char szTemp[16];
 		   y = GetButtons();
 		   if (y & 1) { // button 0
 		      iSelItem++;
-		      if (iSelItem > 4) iSelItem = 0;
+		      if (iSelItem == MENU_COUNT) iSelItem = 0;
 		      continue;
 		   }
 		   if (y & 2) { // button 1 - action on an item
 			   switch (iSelItem) {
-			   case 0: // mode
-				   iMode++;
-				   if (iMode >= MODE_COUNT) iMode = 0;
+			   case MENU_START: // start
+				   bDone = 1;
 				   break;
-			   case 1: // warning level
-				   iLevel += 100;
-				   if (iLevel > 2500) iLevel = 500;
+			   case MENU_MODE: // mode
+				   state.iMode++;
+				   if (state.iMode >= MODE_COUNT) state.iMode = 0;
 				   break;
-			   case 2: // alert type
-				   iAlert++;
-				   if (iAlert >= ALERT_COUNT) iAlert = 0;
+			   case MENU_WARN: // warning level
+				   state.iLevel += 100;
+				   if (state.iLevel > 2500) state.iLevel = 500;
 				   break;
-			   case 3: // time period
-				   iPeriod += 5;
-				   if (iPeriod > 60) iPeriod = 5;
+			   case MENU_ALERT: // alert type
+				   state.iAlert++;
+				   if (state.iAlert >= ALERT_COUNT) state.iAlert = 0;
 				   break;
-			   case 4: // exit
-				   return;
+			   case MENU_TIME: // time period
+				   state.iPeriod += 5;
+				   if (state.iPeriod > 60) state.iPeriod = 5;
+				   break;
 			   }
 			   continue;
 		   }
-		   return;
-	   };
+	   }; // while (!bDone)
+	   // Check if any values changed; if so, write new values to FLASH
+	   if (state.iMode != MODE_CALIBRATE && memcmp(&state, &oldstate, sizeof(state)) != 0)  {
+		   WriteFlash(); // don't save settings for calibration mode
+	   }
 } /* RunMenu() */
 
 void BlinkLED(uint8_t u8LED, int iDuration)
@@ -356,16 +412,14 @@ void ShowAlert(void)
 {
 int i;
 
-	switch (iAlert)
+	switch (state.iAlert)
 	{
 	case ALERT_VIBRATION:
-#ifdef FUTURE
 		for (i=0; i<3; i++) {
 		    Vibrate(150);
 		//    Standby82ms(10);
 		    Delay_Ms(820);
 		  }
-#endif
 		break;
 	case ALERT_LED:
 		for (i=0; i<4; i++) {
@@ -375,13 +429,26 @@ int i;
 		break;
 	case ALERT_BOTH:
 		for (i=0; i<3; i++) {
-		  //  Vibrate(150);
+		    Vibrate(150);
 		    BlinkLED(LED_GREEN, 400);
 		    BlinkLED(LED_RED, 400);
 		  }
 		break;
 	}
 } /* ShowAlert() */
+
+void ShowTime(int iSecs)
+{
+	char szTemp[8];
+    szTemp[0] = '0';
+	szTemp[1] = (iSecs/60)+'0';
+	szTemp[2] = ':';
+	szTemp[3] = ((iSecs % 60) / 10) + '0';
+	szTemp[4] = (iSecs % 10) + '0';
+	szTemp[5] = 0;
+	oledWriteStringCustom(&Roboto_Black_40, 10, 56, szTemp, 1);
+//	oledWriteString(34,24,szTemp, FONT_12x16, 0);
+} /* ShowTime() */
 
 int GetButtons(void)
 {
@@ -403,6 +470,9 @@ void RunLowPower(void)
     scd41_start(SCD_POWERMODE_LOW); // start low power mode (available on SCD40 & SCD41)
 
 	while (1) {
+		if ((iSampleTick & 7) == 0) { // blink LED once every 2 seconds to show we're running
+			  BlinkLED(LED_GREEN, 2);
+		}
 		i = GetButtons();
 		if (i == 3) { // both buttons pressed, return to menu
 			if (bWasSuspended == 1) {
@@ -500,10 +570,55 @@ void RunOnDemand(void)
 	} // while (1)
 } /* RunOnDemand() */
 
+void RunCalibrate(void)
+{
+	int i, j;
+
+	oledFill(0);
+	oledWriteString(10,0,"Calibrate", FONT_12x16, 0);
+    oledWriteString(0,16,"Place device in a", FONT_6x8, 0);
+    oledWriteString(0,24,"free air environment.", FONT_6x8, 0);
+    oledWriteString(0,32,"Press either button", FONT_6x8, 0);
+    oledWriteString(0,40,"to start. When timer", FONT_6x8, 0);
+    oledWriteString(0,48,"finishes, result will", FONT_6x8, 0);
+    oledWriteString(0,56,"show success or fail", FONT_6x8, 0);
+    while (GetButtons()) {
+    	Delay_Ms(20); // wait for user to release button(s)
+    }
+	while ((j = GetButtons()) == 0) {
+		Delay_Ms(20);
+	}
+	if (j == 3) { // both buttons, exit
+		return;
+	}
+	oledFill(0);
+	oledWriteString(0,0,"Calibration running", FONT_6x8, 0);
+   I2CSetSpeed(50000);
+   scd41_start(SCD_POWERMODE_NORMAL);
+   // allow 3 minutes of normal collection
+   for (i=210; i>=0; i--) {
+	  ShowTime(i);
+	  j = GetButtons();
+	  if (j == 3) return; // user quit
+	  Delay_Ms(1000);
+   }
+   scd41_stop(); // stop periodic measurement
+   i = scd41_recalibrate(); // force recalibration
+   if (i == SCD_SUCCESS)
+	   oledWriteString(0,32, "Success!", FONT_12x16, 0);
+   else
+	   oledWriteString(0,32, "Failed", FONT_12x16, 0);
+   oledWriteString(0,56, "Press button to exit", FONT_6x8, 0);
+   while (GetButtons() == 0) {
+	   Delay_Ms(20);
+   }
+} /* RunCalibrate() */
+
 int main(void)
 {
 
     Delay_Init();
+    ReadFlash(); // get the user settings from FLASH
 //    NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
 //    Option_Byte_CFG(); // allow PD7 to be used as GPIO
 //    Delay_Ms(5000); //100); // give time for power to settle
@@ -511,21 +626,24 @@ int main(void)
 //    printf("SystemClk:%d\r\n",SystemCoreClock);
     pinMode(MOTOR_PIN, OUTPUT);
     digitalWrite(MOTOR_PIN, 0);
-    iAlert = ALERT_BOTH;
-    ShowAlert(); // blink LEDs and vibration motor
+    state.iAlert = ALERT_LED;
+    ShowAlert(); // blink LEDs
 menu_top:
    RunMenu();
    // Display the chosen mode
 	oledFill(0);
-	oledWriteString(0,0,szMode[iMode], FONT_8x8, 0);
+	oledWriteString(0,0,szMode[state.iMode], FONT_8x8, 0);
     oledWriteString(0,8,"Starting...", FONT_8x8, 0);
-   if (iMode == MODE_TIMER) {
+   if (state.iMode == MODE_TIMER) {
 	   RunTimer();
 	   goto menu_top;
-   } else if (iMode == MODE_LOW_POWER) {
+   } else if (state.iMode == MODE_CALIBRATE) {
+	   RunCalibrate();
+	   goto menu_top;
+   } else if (state.iMode == MODE_LOW_POWER) {
 	   RunLowPower();
 	   goto menu_top;
-   } else if (iMode == MODE_ON_DEMAND) {
+   } else if (state.iMode == MODE_ON_DEMAND) {
 	   RunOnDemand();
 	   goto menu_top;
    } else { // continuous mode
@@ -544,7 +662,7 @@ get_sample:
     	scd41_getSample();
     	iSample++;
 //    	if (iSample > 3) AddSample(iSample); // add it to collected stats
-    	if (iSample == 16 && iMode != MODE_CONTINUOUS ) { // after 1 minute, turn off the display
+    	if (iSample == 16 && state.iMode != MODE_CONTINUOUS ) { // after 1 minute, turn off the display
     		oledPower(0); // turn off display
     	}
     	ShowCurrent(); // display the current conditions on the OLED

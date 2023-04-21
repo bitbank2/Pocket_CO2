@@ -59,6 +59,19 @@ int scd41_stop(void)
     return SCD_ERROR;
 } /* scd41_stop() */
 
+int scd41_recalibrate(void)
+{
+uint8_t ucTemp[4];
+
+	scd41_sendCMD2(SCD41_CMD_FORCE_RECALIBRATE, 423); // set the reference CO2 level at 423ppm
+	Delay_Ms(400); // wait to complete
+    I2CRead(0x62, ucTemp, 3); // 3 byte response. 0xFFFF = failed
+    if (ucTemp[0] == 0xff && ucTemp[1] == 0xff)
+    	return SCD_ERROR;
+    else
+    	return SCD_SUCCESS;
+} /* scd41_recalibrate() */
+
 int scd41_start(int iPowerMode)
 {
 // Start correct mode

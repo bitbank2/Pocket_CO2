@@ -538,7 +538,7 @@ GFXglyph glyph, *pGlyph;
          continue; // skip it
       c -= font.first; // first char of font defined
       memcpy_P(&glyph, &font.glyph[c], sizeof(glyph));
-      dx = x + pGlyph->xOffset; // offset from character UL to start drawing
+      dx = x; // + pGlyph->xOffset; // offset from character UL to start drawing
       dy = y + pGlyph->yOffset;
       s = font.bitmap + pGlyph->bitmapOffset; // start of bitmap data
       // Bitmap drawing loop. Image is MSB first and each pixel is packed next
@@ -553,7 +553,7 @@ GFXglyph glyph, *pGlyph;
       memset(&u8Cache[1], ucFill, sizeof(u8Cache)-1);
       for (ty=dy; ty<end_y && ty < OLED_HEIGHT; ty++) {
           ucMask = 1<<(ty & 7); // destination bit number for this line
-          d = &u8Cache[1]; // no backing ram; buffer 8 lines at a time
+          d = &u8Cache[1+pGlyph->xOffset]; // no backing ram; buffer 8 lines at a time
          for (tx=0; tx<pGlyph->width; tx++) {
             if (bits == 0) { // need to read more font data
                uc = pgm_read_byte(&s[iBitOff>>3]); // get more font bitmap data
@@ -579,7 +579,7 @@ GFXglyph glyph, *pGlyph;
          } // for x
           if ((ucMask == 0x80 || ty == end_y-1)) { // dump this line
               oledSetPosition(dx, (ty & 0xfff8));
-              I2CWrite(oledAddr, u8Cache, pGlyph->width + 1);
+              I2CWrite(oledAddr, u8Cache, pGlyph->xAdvance+1);
               memset(&u8Cache[1], ucFill, sizeof(u8Cache)-1); // NB: assume no DMA
           }
       } // for y
