@@ -1,9 +1,22 @@
-/*
- * scd41.h
- *
- *  Created on: Jan 10, 2023
- *      Author: larry
- */
+//
+// SCD4x CO2 sensor library
+// written by Larry Bank
+// bitbank@pobox.com
+// Copyright (c) 2023 BitBank Software, Inc.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
 
 #ifndef SCD41_H_
 #define SCD41_H_
@@ -41,6 +54,6 @@ int scd41_start(int iPowerMode);
 int scd41_getSample(void);
 int scd41_shutdown(void); // SCD41 only
 int scd41_stop(void);
-int scd41_recalibrate(void);
+int scd41_recalibrate(uint16_t u16CO2);
 
 #endif /* SCD41_H_ */

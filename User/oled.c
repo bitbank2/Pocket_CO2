@@ -1,9 +1,22 @@
-/*
- * oled.c
- *
- *  Created on: Jan 17, 2023
- *      Author: larry
- */
+//
+// SSD1306 OLED display library
+// written by Larry Bank
+// bitbank@pobox.com
+// Copyright (c) 2023 BitBank Software, Inc.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
 #include <stdint.h>
 #include <string.h>
 #include "oled.h"
@@ -319,7 +332,7 @@ void oledContrast(uint8_t cont)
 // Draw a string of normal (8x8), small (6x8) or large (16x32) characters
 // At the given col+row
 //
-int oledWriteString(int x, int y, char *szMsg, int iSize, int bInvert)
+int oledWriteString(int x, int y, const char *szMsg, int iSize, int bInvert)
 {
 int i, iFontOff, iLen;
 unsigned char c, *s, ucTemp[40];
@@ -513,7 +526,7 @@ void oledClearLine(int y)
 // Draw a string of characters in a custom font
 // A back buffer must be defined
 //
-void oledWriteStringCustom(const GFXfont *pFont, int x, int y, char *szMsg, uint8_t ucColor)
+void oledWriteStringCustom(const GFXfont *pFont, int x, int y, const char *szMsg, uint8_t ucColor)
 {
 int i, end_y, dx, dy, tx, ty, iBitOff;
 unsigned int c;

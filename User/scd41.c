@@ -1,9 +1,22 @@
-/*
- * scd41.c
- *
- *  Created on: Jan 10, 2023
- *      Author: larry
- */
+//
+// SCD4x CO2 sensor library
+// written by Larry Bank
+// bitbank@pobox.com
+// Copyright (c) 2023 BitBank Software, Inc.
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
 #include <stdint.h>
 #include "scd41.h"
 
@@ -52,18 +65,18 @@ void scd41_wakeup(void)
 
 int scd41_stop(void)
 {
-    if (scd41_sendCMD(SCD41_CMD_STOP_PERIODIC_MEASUREMENT)) {
+    if (scd41_sendCMD(SCD41_CMD_STOP_PERIODIC_MEASUREMENT) == SCD_SUCCESS) {
         Delay_Ms(500); // wait for it to execute
         return SCD_SUCCESS;
     }
     return SCD_ERROR;
 } /* scd41_stop() */
 
-int scd41_recalibrate(void)
+int scd41_recalibrate(uint16_t u16CO2)
 {
 uint8_t ucTemp[4];
 
-	scd41_sendCMD2(SCD41_CMD_FORCE_RECALIBRATE, 423); // set the reference CO2 level at 423ppm
+	scd41_sendCMD2(SCD41_CMD_FORCE_RECALIBRATE, u16CO2); // set the reference CO2 level
 	Delay_Ms(400); // wait to complete
     I2CRead(0x62, ucTemp, 3); // 3 byte response. 0xFFFF = failed
     if (ucTemp[0] == 0xff && ucTemp[1] == 0xff)
