@@ -268,13 +268,17 @@ void ShowGraph(void)
 //
 void ShowCurrent(void)
 {
-int x;
+int i, x;
 char szTemp[32];
 
 	I2CSetSpeed(400000); // OLED can handle 400k
-	i2str(szTemp, (int)_iCO2);
+	i = i2str(szTemp, (int)_iCO2);
 	oledWriteStringCustom(&Roboto_Black_40, 0, 32, szTemp, 1);
 	x = oledGetCursorX();
+	if (i < 4) {
+	   oledWriteString(x+24, 0, "  ", FONT_12x16, 0); // make sure old data is erased if going from 4 to 3 digits
+	   oledWriteString(x, 16, "   ", FONT_12x16, 0);
+	}
 	oledWriteString(x, 0, "CO2", FONT_8x8, 0);
 	oledWriteString(x, 8, "ppm", FONT_8x8, 0);
     oledWriteStringCustom(&Roboto_Black_13, 0, 45, (char *)"Temp", 1);
